@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 
-project('cdba',
+project('abcd',
 	'c',
 	license : [ 'BSD-3-Clause'],
 	meson_version : '>= 0.43.0', # for compiler.get_supported_arguments()
@@ -41,9 +41,9 @@ endif
 add_global_arguments(compiler.get_supported_arguments(compiler_cflags),
 		     language: 'c')
 
-client_srcs = ['cdba.c',
+client_srcs = ['abcd.c',
 	       'circ_buf.c']
-executable('cdba',
+executable('abcd',
 	   client_srcs,
 	   install : true)
 
@@ -55,19 +55,16 @@ endif
 server_deps = [dependency('libudev'),
 	       dependency('yaml-0.1'),
 	       ftdi_dep]
-server_srcs = ['cdba-server.c',
-	       'cdb_assist.c',
+server_srcs = ['abcd-server.c',
 	       'circ_buf.c',
 	       'conmux.c',
 	       'device.c',
 	       'device_parser.c',
 	       'fastboot.c',
-	       'alpaca.c',
 	       'ftdi-gpio.c',
 	       'console.c',
-	       'qcomlt_dbg.c',
 	       'ppps.c']
-executable('cdba-server',
+executable('abcd-server',
 	   server_srcs,
 	   dependencies : server_deps,
 	   install : true)

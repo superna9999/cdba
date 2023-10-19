@@ -33,12 +33,9 @@
 #include <yaml.h>
 
 #include "device.h"
-#include "alpaca.h"
 #include "ftdi-gpio.h"
-#include "cdb_assist.h"
 #include "conmux.h"
 #include "console.h"
-#include "qcomlt_dbg.h"
 #include "ppps.h"
 
 #define TOKEN_LENGTH	16384
@@ -119,28 +116,12 @@ static void parse_board(struct device_parser *dp)
 			dev->board = strdup(value);
 		} else if (!strcmp(key, "name")) {
 			dev->name = strdup(value);
-		} else if (!strcmp(key, "cdba")) {
-			dev->control_dev = strdup(value);
-
-			dev->open = cdb_assist_open;
-			dev->close = cdb_assist_close;
-			dev->power = cdb_assist_power;
-			dev->print_status = cdb_assist_print_status;
-			dev->usb = cdb_assist_usb;
-			dev->key = cdb_assist_key;
 		} else if (!strcmp(key, "conmux")) {
 			dev->control_dev = strdup(value);
 
 			dev->open = conmux_open;
 			dev->power = conmux_power;
 			dev->write = conmux_write;
-		} else if (!strcmp(key, "alpaca")) {
-			dev->control_dev = strdup(value);
-
-			dev->open = alpaca_open;
-			dev->power = alpaca_power;
-			dev->usb = alpaca_usb;
-			dev->key = alpaca_key;
 		} else if (!strcmp(key, "ftdi_gpio")) {
 			dev->control_dev = strdup(value);
 
@@ -148,13 +129,6 @@ static void parse_board(struct device_parser *dp)
 			dev->power = ftdi_gpio_power;
 			dev->usb = ftdi_gpio_usb;
 			dev->key = ftdi_gpio_key;
-		} else if (!strcmp(key, "qcomlt_debug_board")) {
-			dev->control_dev = strdup(value);
-
-			dev->open = qcomlt_dbg_open;
-			dev->power = qcomlt_dbg_power;
-			dev->usb = qcomlt_dbg_usb;
-			dev->key = qcomlt_dbg_key;
 		} else if (!strcmp(key, "console")) {
 			dev->console_dev = strdup(value);
 			dev->write = console_write;

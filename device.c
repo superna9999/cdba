@@ -40,7 +40,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include "cdba-server.h"
+#include "abcd-server.h"
 #include "device.h"
 #include "fastboot.h"
 #include "console.h"
@@ -62,7 +62,7 @@ static void device_lock(struct device *device)
 	int fd;
 	int n;
 
-	n = snprintf(lock, sizeof(lock), "/tmp/cdba-%s.lock", device->board);
+	n = snprintf(lock, sizeof(lock), "/tmp/abcd-%s.lock", device->board);
 	if (n >= (int)sizeof(lock))
 		errx(1, "failed to build lockfile path");
 
@@ -313,10 +313,10 @@ void device_list_devices(const char *username)
 		else
 			len = snprintf(buf, sizeof(buf), "%s", device->board);
 
-		cdba_send_buf(MSG_LIST_DEVICES, len, buf);
+		abcd_send_buf(MSG_LIST_DEVICES, len, buf);
 	}
 
-	cdba_send_buf(MSG_LIST_DEVICES, 0, NULL);
+	abcd_send_buf(MSG_LIST_DEVICES, 0, NULL);
 }
 
 void device_info(const char *username, const void *data, size_t dlen)
@@ -339,7 +339,7 @@ void device_info(const char *username, const void *data, size_t dlen)
 		}
 	}
 
-	cdba_send_buf(MSG_BOARD_INFO, len, description);
+	abcd_send_buf(MSG_BOARD_INFO, len, description);
 }
 
 void device_close(struct device *dev)

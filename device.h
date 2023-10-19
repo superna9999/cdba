@@ -4,7 +4,6 @@
 #include <termios.h>
 #include "list.h"
 
-struct cdb_assist;
 struct fastboot;
 struct fastboot_ops;
 

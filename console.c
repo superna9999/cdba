@@ -34,7 +34,7 @@
 #include <err.h>
 #include <unistd.h>
 
-#include "cdba-server.h"
+#include "abcd-server.h"
 #include "device.h"
 
 static int console_data(int fd, void *data)
@@ -46,7 +46,7 @@ static int console_data(int fd, void *data)
 	if (n < 0)
 		return n;
 
-	cdba_send_buf(MSG_CONSOLE, n, buf);
+	abcd_send_buf(MSG_CONSOLE, n, buf);
 
 	return 0;
 }

@@ -40,7 +40,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#include "cdba-server.h"
+#include "abcd-server.h"
 #include "conmux.h"
 
 extern int h_errno;
@@ -218,7 +218,7 @@ static int conmux_data(int fd, void *data)
 		fprintf(stderr, "Received EOF from conmux\n");
 		watch_quit();
 	} else {
-		cdba_send_buf(MSG_CONSOLE, n, buf);
+		abcd_send_buf(MSG_CONSOLE, n, buf);
 	}
 
 	return 0;
@@ -271,7 +271,7 @@ void *conmux_open(struct device *dev)
 	if (fd == -1)
 		errx(1, "failed to connect to conmux instance");
 
-	ret = snprintf(req, sizeof(req), "CONNECT id=cdba:%s to=console\n", user);
+	ret = snprintf(req, sizeof(req), "CONNECT id=abcd:%s to=console\n", user);
 	if (ret >= (int)sizeof(req))
 		errx(1, "unable to fit connect request in buffer");
 

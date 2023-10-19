@@ -39,7 +39,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "cdba-server.h"
+#include "abcd-server.h"
 #include "circ_buf.h"
 #include "device.h"
 #include "device_parser.h"
@@ -85,7 +85,7 @@ static void fastboot_opened(struct fastboot *fb, void *data)
 
 	warnx("fastboot connection opened");
 
-	cdba_send_buf(MSG_FASTBOOT_PRESENT, 1, &one);
+	abcd_send_buf(MSG_FASTBOOT_PRESENT, 1, &one);
 }
 
 static void fastboot_info(struct fastboot *fb, const void *buf, size_t len)
@@ -97,7 +97,7 @@ static void fastboot_disconnect(void *data)
 {
 	const uint8_t zero = 0;
 
-	cdba_send_buf(MSG_FASTBOOT_PRESENT, 1, &zero);
+	abcd_send_buf(MSG_FASTBOOT_PRESENT, 1, &zero);
 }
 
 static struct fastboot_ops fastboot_ops = {
@@ -114,7 +114,7 @@ static void msg_select_board(const void *param)
 		quit_invoked = true;
 	}
 
-	cdba_send(MSG_SELECT_BOARD);
+	abcd_send(MSG_SELECT_BOARD);
 }
 
 static void *fastboot_payload;
@@ -137,14 +137,14 @@ static void msg_fastboot_download(const void *data, size_t len)
 	if (!len) {
 		device_boot(selected_device, fastboot_payload, fastboot_size);
 
-		cdba_send(MSG_FASTBOOT_DOWNLOAD);
+		abcd_send(MSG_FASTBOOT_DOWNLOAD);
 		free(fastboot_payload);
 		fastboot_payload = NULL;
 		fastboot_size = 0;
 	}
 }
 
-void cdba_send_buf(int type, size_t len, const void *buf)
+void abcd_send_buf(int type, size_t len, const void *buf)
 {
 	struct msg msg = {
 		.type = type,
@@ -196,12 +196,12 @@ static int handle_stdin(int fd, void *buf)
 		case MSG_POWER_ON:
 			device_power(selected_device, true);
 
-			cdba_send(MSG_POWER_ON);
+			abcd_send(MSG_POWER_ON);
 			break;
 		case MSG_POWER_OFF:
 			device_power(selected_device, false);
 
-			cdba_send(MSG_POWER_OFF);
+			abcd_send(MSG_POWER_OFF);
 			break;
 		case MSG_FASTBOOT_DOWNLOAD:
 			msg_fastboot_download(msg->data, msg->len);
@@ -355,11 +355,11 @@ int main(int argc, char **argv)
 
 	signal(SIGPIPE, sigpipe_handler);
 
-	username = getenv("CDBA_USER");
+	username = getenv("ABCD_USER");
 
-	ret = device_parser(".cdba");
+	ret = device_parser(".abcd");
 	if (ret) {
-		ret = device_parser("/etc/cdba");
+		ret = device_parser("/etc/abcd");
 		if (ret) {
 			fprintf(stderr, "device parser: unable to open config file\n");
 			exit(1);

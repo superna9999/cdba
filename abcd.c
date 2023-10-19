@@ -44,7 +44,7 @@
 #include <termios.h>
 #include <unistd.h>
 
-#include "cdba.h"
+#include "abcd.h"
 #include "circ_buf.h"
 #include "list.h"
 
@@ -144,8 +144,8 @@ static int fork_ssh(const char *host, const char *cmd, int *pipes)
 	return 0;
 }
 
-#define cdba_send(fd, type) cdba_send_buf(fd, type, 0, NULL)
-static int cdba_send_buf(int fd, int type, size_t len, const void *buf)
+#define abcd_send(fd, type) abcd_send_buf(fd, type, 0, NULL)
+static int abcd_send_buf(int fd, int type, size_t len, const void *buf)
 {
 	int ret;
 
@@ -185,31 +185,31 @@ static int tty_callback(int *ssh_fds)
 				quit = true;
 				break;
 			case 'P':
-				cdba_send(ssh_fds[0], MSG_POWER_ON);
+				abcd_send(ssh_fds[0], MSG_POWER_ON);
 				break;
 			case 'p':
-				cdba_send(ssh_fds[0], MSG_POWER_OFF);
+				abcd_send(ssh_fds[0], MSG_POWER_OFF);
 				break;
 			case 's':
-				cdba_send(ssh_fds[0], MSG_STATUS_UPDATE);
+				abcd_send(ssh_fds[0], MSG_STATUS_UPDATE);
 				break;
 			case 'V':
-				cdba_send(ssh_fds[0], MSG_VBUS_ON);
+				abcd_send(ssh_fds[0], MSG_VBUS_ON);
 				break;
 			case 'v':
-				cdba_send(ssh_fds[0], MSG_VBUS_OFF);
+				abcd_send(ssh_fds[0], MSG_VBUS_OFF);
 				break;
 			case 'a':
-				cdba_send_buf(ssh_fds[0], MSG_CONSOLE, 1, &ctrl_a);
+				abcd_send_buf(ssh_fds[0], MSG_CONSOLE, 1, &ctrl_a);
 				break;
 			case 'B':
-				cdba_send(ssh_fds[0], MSG_SEND_BREAK);
+				abcd_send(ssh_fds[0], MSG_SEND_BREAK);
 				break;
 			}
 
 			special = false;
 		} else {
-			cdba_send_buf(ssh_fds[0], MSG_CONSOLE, 1, buf + k);
+			abcd_send_buf(ssh_fds[0], MSG_CONSOLE, 1, buf + k);
 		}
 	}
 
@@ -228,7 +228,7 @@ static void list_boards_fn(struct work *work, int ssh_stdin)
 {
 	int ret;
 
-	ret = cdba_send(ssh_stdin, MSG_LIST_DEVICES);
+	ret = abcd_send(ssh_stdin, MSG_LIST_DEVICES);
 	if (ret < 0)
 		err(1, "failed to send board list request");
 
@@ -255,7 +255,7 @@ static void board_info_fn(struct work *work, int ssh_stdin)
 	struct board_info_request *board = container_of(work, struct board_info_request, work);
 	int ret;
 
-	ret = cdba_send_buf(ssh_stdin, MSG_BOARD_INFO,
+	ret = abcd_send_buf(ssh_stdin, MSG_BOARD_INFO,
 			    strlen(board->board) + 1,
 			    board->board);
 	if (ret < 0)
@@ -286,7 +286,7 @@ static void select_board_fn(struct work *work, int ssh_stdin)
 	struct select_board *board = container_of(work, struct select_board, work);
 	int ret;
 
-	ret = cdba_send_buf(ssh_stdin, MSG_SELECT_BOARD,
+	ret = abcd_send_buf(ssh_stdin, MSG_SELECT_BOARD,
 			    strlen(board->board) + 1,
 			    board->board);
 	if (ret < 0)
@@ -310,7 +310,7 @@ static void request_power_on_fn(struct work *work, int ssh_stdin)
 {
 	int ret;
 
-	ret = cdba_send(ssh_stdin, MSG_POWER_ON);
+	ret = abcd_send(ssh_stdin, MSG_POWER_ON);
 	if (ret < 0)
 		err(1, "failed to send power on request");
 }
@@ -319,7 +319,7 @@ static void request_power_off_fn(struct work *work, int ssh_stdin)
 {
 	int ret;
 
-	ret = cdba_send(ssh_stdin, MSG_POWER_OFF);
+	ret = abcd_send(ssh_stdin, MSG_POWER_OFF);
 	if (ret < 0)
 		err(1, "failed to send power off request");
 }
@@ -354,7 +354,7 @@ static void fastboot_work_fn(struct work *_work, int ssh_stdin)
 
 	left = MIN(2048, work->size - work->offset);
 
-	ret = cdba_send_buf(ssh_stdin, MSG_FASTBOOT_DOWNLOAD,
+	ret = abcd_send_buf(ssh_stdin, MSG_FASTBOOT_DOWNLOAD,
 			    left,
 			    (char *)work->data + work->offset);
 	if (ret < 0 && errno == EAGAIN) {
@@ -565,9 +565,9 @@ static void usage(void)
 }
 
 enum {
-	CDBA_BOOT,
-	CDBA_LIST,
-	CDBA_INFO,
+	ABCD_BOOT,
+	ABCD_LIST,
+	ABCD_INFO,
 };
 
 int main(int argc, char **argv)
@@ -576,7 +576,7 @@ int main(int argc, char **argv)
 	struct timeval timeout_inactivity_tv;
 	struct timeval timeout_total_tv;
 	struct termios *orig_tios;
-	const char *server_binary = "cdba-server";
+	const char *server_binary = "abcd-server";
 	int timeout_inactivity = 0;
 	int timeout_total = 600;
 	struct work *next;
@@ -593,7 +593,7 @@ int main(int argc, char **argv)
 	fd_set wfds;
 	ssize_t n;
 	int nfds;
-	int verb = CDBA_BOOT;
+	int verb = ABCD_BOOT;
 	int opt;
 	int ret;
 
@@ -612,10 +612,10 @@ int main(int argc, char **argv)
 			host = optarg;
 			break;
 		case 'i':
-			verb = CDBA_INFO;
+			verb = ABCD_INFO;
 			break;
 		case 'l':
-			verb = CDBA_LIST;
+			verb = ABCD_LIST;
 			break;
 		case 'R':
 			fastboot_repeat = true;
@@ -638,7 +638,7 @@ int main(int argc, char **argv)
 		usage();
 
 	switch (verb) {
-	case CDBA_BOOT:
+	case ABCD_BOOT:
 		if (optind >= argc || !board)
 			usage();
 
@@ -650,10 +650,10 @@ int main(int argc, char **argv)
 
 		request_select_board(board);
 		break;
-	case CDBA_LIST:
+	case ABCD_LIST:
 		request_board_list();
 		break;
-	case CDBA_INFO:
+	case ABCD_INFO:
 		if (!board)
 			usage();
 
@@ -782,7 +782,7 @@ int main(int argc, char **argv)
 	close(ssh_fds[1]);
 	close(ssh_fds[2]);
 
-	if (verb == CDBA_BOOT)
+	if (verb == ABCD_BOOT)
 		printf("Waiting for ssh to finish\n");
 
 	wait(NULL);
