@@ -1,6 +1,9 @@
 = ABCD control tool
 The ABCD control tool is used for remotely booting Amlogic TF-A images on development boards
 
+This is a friendly fork on CDBA (https://github.com/linux-msm/cdba) for the only
+purpose to boot amlogic bootloader to run the U-Boot test suite.
+
 = Dependencies
 sudo apt-get install libudev-dev libyaml-dev libftdi1-dev pkg-config meson for debian systems
 dnf install systemd-devel libyaml-devel libftdi1-devel pkg-config meson for fedora systems
