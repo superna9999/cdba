@@ -34,6 +34,7 @@
 
 #include "device.h"
 #include "ftdi-gpio.h"
+#include "local-gpio.h"
 #include "conmux.h"
 #include "console.h"
 #include "ppps.h"
@@ -130,6 +131,13 @@ static void parse_board(struct device_parser *dp)
 			dev->power = ftdi_gpio_power;
 			dev->usb = ftdi_gpio_usb;
 			dev->key = ftdi_gpio_key;
+		} else if (!strcmp(key, "local_gpio")) {
+			dev->control_dev = strdup(value);
+
+			dev->open = local_gpio_open;
+			dev->power = local_gpio_power;
+			dev->usb = local_gpio_usb;
+			dev->key = local_gpio_key;
 		} else if (!strcmp(key, "console")) {
 			dev->console_dev = strdup(value);
 			dev->write = console_write;

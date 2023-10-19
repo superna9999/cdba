@@ -54,6 +54,7 @@ endif
 
 server_deps = [dependency('libudev'),
 	       dependency('yaml-0.1'),
+	       dependency('libgpiod'),
 	       ftdi_dep]
 server_srcs = ['abcd-server.c',
 	       'circ_buf.c',
@@ -62,6 +63,7 @@ server_srcs = ['abcd-server.c',
 	       'device_parser.c',
 	       'pyamlboot.c',
 	       'ftdi-gpio.c',
+	       'local-gpio.c',
 	       'console.c',
 	       'ppps.c']
 executable('abcd-server',
