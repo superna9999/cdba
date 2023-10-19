@@ -177,7 +177,7 @@ static int pyamlboot_execute(const char *command)
 	case 0:
 		/* Do not clobber stdout with program messages or abcd will become confused */
 		dup2(2, 1);
-		return system(command);
+		exit(system(command));
 	case -1:
 		return -1;
 	default:
