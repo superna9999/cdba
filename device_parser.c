@@ -37,6 +37,7 @@
 #include "conmux.h"
 #include "console.h"
 #include "ppps.h"
+#include "pyamlboot.h"
 
 #define TOKEN_LENGTH	16384
 
@@ -135,23 +136,15 @@ static void parse_board(struct device_parser *dp)
 			dev->send_break = console_send_break;
 		} else if (!strcmp(key, "voltage")) {
 			dev->voltage = strtoul(value, NULL, 10);
-		} else if (!strcmp(key, "fastboot")) {
+		} else if (!strcmp(key, "pyamlboot")) {
 			dev->serial = strdup(value);
 
 			if (!dev->boot)
-				dev->boot = device_fastboot_boot;
-		} else if (!strcmp(key, "fastboot_set_active")) {
-			if (!strcmp(value, "true"))
-				dev->set_active = "a";
-			else
-				dev->set_active = strdup(value);
-		} else if (!strcmp(key, "broken_fastboot_boot")) {
-			if (!strcmp(value, "true"))
-				dev->boot = device_fastboot_flash_reboot;
+				dev->do_boot = pyamlboot_boot;
 		} else if (!strcmp(key, "description")) {
 			dev->description = strdup(value);
-		} else if (!strcmp(key, "fastboot_key_timeout")) {
-			dev->fastboot_key_timeout = strtoul(value, NULL, 10);
+		} else if (!strcmp(key, "boot_key_timeout")) {
+			dev->boot_key_timeout = strtoul(value, NULL, 10);
 		} else if (!strcmp(key, "usb_always_on")) {
 			dev->usb_always_on = !strcmp(value, "true");
 		} else if (!strcmp(key, "ppps_path")) {

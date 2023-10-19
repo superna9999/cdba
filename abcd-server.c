@@ -43,7 +43,8 @@
 #include "circ_buf.h"
 #include "device.h"
 #include "device_parser.h"
-#include "fastboot.h"
+#include "boot.h"
+#include "pyamlboot.h"
 #include "list.h"
 
 static bool quit_invoked;
@@ -79,36 +80,36 @@ int tty_open(const char *tty, struct termios *old)
 	return fd;
 }
 
-static void fastboot_opened(struct fastboot *fb, void *data)
+static void boot_opened(void *data)
 {
 	const uint8_t one = 1;
 
-	warnx("fastboot connection opened");
+	warnx("boot connection opened");
 
-	abcd_send_buf(MSG_FASTBOOT_PRESENT, 1, &one);
+	abcd_send_buf(MSG_BOOT_PRESENT, 1, &one);
 }
 
-static void fastboot_info(struct fastboot *fb, const void *buf, size_t len)
+static void boot_info(void *data, const void *buf, size_t len)
 {
 	fprintf(stderr, "%s\n", (const char *)buf);
 }
 
-static void fastboot_disconnect(void *data)
+static void boot_disconnect(void *data)
 {
 	const uint8_t zero = 0;
 
-	abcd_send_buf(MSG_FASTBOOT_PRESENT, 1, &zero);
+	abcd_send_buf(MSG_BOOT_PRESENT, 1, &zero);
 }
 
-static struct fastboot_ops fastboot_ops = {
-	.opened = fastboot_opened,
-	.disconnect = fastboot_disconnect,
-	.info = fastboot_info,
+static struct boot_ops abcd_boot_ops = {
+	.opened = boot_opened,
+	.disconnect = boot_disconnect,
+	.info = boot_info,
 };
 
 static void msg_select_board(const void *param)
 {
-	selected_device = device_open(param, username, &fastboot_ops);
+	selected_device = device_open(param, username, &abcd_boot_ops);
 	if (!selected_device) {
 		fprintf(stderr, "failed to open %s\n", (const char *)param);
 		quit_invoked = true;
@@ -117,30 +118,30 @@ static void msg_select_board(const void *param)
 	abcd_send(MSG_SELECT_BOARD);
 }
 
-static void *fastboot_payload;
-static size_t fastboot_size;
+static void *boot_payload;
+static size_t boot_size;
 
-static void msg_fastboot_download(const void *data, size_t len)
+static void msg_boot_download(const void *data, size_t len)
 {
-	size_t new_size = fastboot_size + len;
+	size_t new_size = boot_size + len;
 	char *newp;
 
-	newp = realloc(fastboot_payload, new_size);
+	newp = realloc(boot_payload, new_size);
 	if (!newp)
-		err(1, "failed too expant fastboot scratch area");
+		err(1, "failed too expant boot scratch area");
 
-	memcpy(newp + fastboot_size, data, len);
+	memcpy(newp + boot_size, data, len);
 
-	fastboot_payload = newp;
-	fastboot_size = new_size;
+	boot_payload = newp;
+	boot_size = new_size;
 
 	if (!len) {
-		device_boot(selected_device, fastboot_payload, fastboot_size);
+		device_boot(selected_device, boot_payload, boot_size);
 
-		abcd_send(MSG_FASTBOOT_DOWNLOAD);
-		free(fastboot_payload);
-		fastboot_payload = NULL;
-		fastboot_size = 0;
+		abcd_send(MSG_BOOT_DOWNLOAD);
+		free(boot_payload);
+		boot_payload = NULL;
+		boot_size = 0;
 	}
 }
 
@@ -185,7 +186,7 @@ static int handle_stdin(int fd, void *buf)
 		case MSG_CONSOLE:
 			device_write(selected_device, msg->data, msg->len);
 			break;
-		case MSG_FASTBOOT_PRESENT:
+		case MSG_BOOT_PRESENT:
 			break;
 		case MSG_SELECT_BOARD:
 			msg_select_board(msg->data);
@@ -203,11 +204,11 @@ static int handle_stdin(int fd, void *buf)
 
 			abcd_send(MSG_POWER_OFF);
 			break;
-		case MSG_FASTBOOT_DOWNLOAD:
-			msg_fastboot_download(msg->data, msg->len);
+		case MSG_BOOT_DOWNLOAD:
+			msg_boot_download(msg->data, msg->len);
 			break;
-		case MSG_FASTBOOT_BOOT:
-			// fprintf(stderr, "fastboot boot\n");
+		case MSG_BOOT:
+			fprintf(stderr, "boot\n");
 			break;
 		case MSG_STATUS_UPDATE:
 			device_print_status(selected_device);

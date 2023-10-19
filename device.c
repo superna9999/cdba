@@ -42,7 +42,8 @@
 
 #include "abcd-server.h"
 #include "device.h"
-#include "fastboot.h"
+#include "boot.h"
+#include "pyamlboot.h"
 #include "console.h"
 #include "list.h"
 #include "ppps.h"
@@ -106,7 +107,7 @@ static bool device_check_access(struct device *device,
 
 struct device *device_open(const char *board,
 			   const char *username,
-			   struct fastboot_ops *fastboot_ops)
+			   struct boot_ops *boot_ops)
 {
 	struct device *device;
 
@@ -137,7 +138,7 @@ found:
 	if (device->usb_always_on)
 		device_usb(device, true);
 
-	device->fastboot = fastboot_open(device->serial, fastboot_ops, NULL);
+	device->boot = pyamlboot_open(device->serial, boot_ops, NULL);
 
 	return device;
 }
@@ -158,7 +159,7 @@ enum {
 	DEVICE_STATE_CONNECT,
 	DEVICE_STATE_PRESS,
 	DEVICE_STATE_RELEASE_PWR,
-	DEVICE_STATE_RELEASE_FASTBOOT,
+	DEVICE_STATE_RELEASE_BOOT,
 	DEVICE_STATE_RUNNING,
 };
 
@@ -168,9 +169,8 @@ static void device_tick(void *data)
 
 	switch (device->state) {
 	case DEVICE_STATE_START:
-		/* Make sure power key is not engaged */
-		if (device->fastboot_key_timeout)
-			device_key(device, DEVICE_KEY_FASTBOOT, true);
+		if (device->boot_key_timeout)
+			device_key(device, DEVICE_KEY_BOOT, true);
 		if (device->has_power_key)
 			device_key(device, DEVICE_KEY_POWER, false);
 
@@ -185,9 +185,9 @@ static void device_tick(void *data)
 		if (device->has_power_key) {
 			device->state = DEVICE_STATE_PRESS;
 			watch_timer_add(250, device_tick, device);
-		} else if (device->fastboot_key_timeout) {
-			device->state = DEVICE_STATE_RELEASE_FASTBOOT;
-			watch_timer_add(device->fastboot_key_timeout * 1000, device_tick, device);
+		} else if (device->boot_key_timeout) {
+			device->state = DEVICE_STATE_RELEASE_BOOT;
+			watch_timer_add(device->boot_key_timeout * 1000, device_tick, device);
 		} else {
 			device->state = DEVICE_STATE_RUNNING;
 		}
@@ -203,15 +203,15 @@ static void device_tick(void *data)
 		/* Release power key */
 		device_key(device, DEVICE_KEY_POWER, false);
 
-		if (device->fastboot_key_timeout) {
-			device->state = DEVICE_STATE_RELEASE_FASTBOOT;
-			watch_timer_add(device->fastboot_key_timeout * 1000, device_tick, device);
+		if (device->boot_key_timeout) {
+			device->state = DEVICE_STATE_RELEASE_BOOT;
+			watch_timer_add(device->boot_key_timeout * 1000, device_tick, device);
 		} else {
 			device->state = DEVICE_STATE_RUNNING;
 		}
 		break;
-	case DEVICE_STATE_RELEASE_FASTBOOT:
-		device_key(device, DEVICE_KEY_FASTBOOT, false);
+	case DEVICE_STATE_RELEASE_BOOT:
+		device_key(device, DEVICE_KEY_BOOT, false);
 		device->state = DEVICE_STATE_RUNNING;
 		break;
 	}
@@ -272,24 +272,10 @@ int device_write(struct device *device, const void *buf, size_t len)
 	return device->write(device, buf, len);
 }
 
-void device_fastboot_boot(struct device *device)
-{
-	fastboot_boot(device->fastboot);
-}
-
-void device_fastboot_flash_reboot(struct device *device)
-{
-	fastboot_flash(device->fastboot, "boot");
-	fastboot_reboot(device->fastboot);
-}
-
 void device_boot(struct device *device, const void *data, size_t len)
 {
 	warnx("booting the board...");
-	if (device->set_active)
-		fastboot_set_active(device->fastboot, device->set_active);
-	fastboot_download(device->fastboot, data, len);
-	device->boot(device);
+	device->do_boot(device, data, len);
 }
 
 void device_send_break(struct device *device)

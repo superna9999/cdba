@@ -60,7 +60,7 @@ server_srcs = ['abcd-server.c',
 	       'conmux.c',
 	       'device.c',
 	       'device_parser.c',
-	       'fastboot.c',
+	       'pyamlboot.c',
 	       'ftdi-gpio.c',
 	       'console.c',
 	       'ppps.c']

@@ -243,7 +243,7 @@ void ftdi_gpio_key(struct device *dev, int key, bool asserted)
 	struct ftdi_gpio *ftdi_gpio = dev->cdb;
 
 	switch (key) {
-	case DEVICE_KEY_FASTBOOT:
+	case DEVICE_KEY_BOOT:
 		ftdi_gpio_toggle_io(ftdi_gpio, GPIO_FASTBOOT_KEY, asserted);
 		break;
 	case DEVICE_KEY_POWER:

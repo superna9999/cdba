@@ -49,10 +49,9 @@
 #include "list.h"
 
 static bool quit;
-static bool fastboot_repeat;
-static bool fastboot_done;
+static bool boot_done;
 
-static const char *fastboot_file;
+static const char *boot_file;
 
 static struct termios *tty_unbuffer(void)
 {
@@ -338,7 +337,7 @@ static void request_power_off(void)
 	list_add(&work_items, &work.node);
 }
 
-struct fastboot_download_work {
+struct boot_download_work {
 	struct work work;
 
 	void *data;
@@ -346,22 +345,22 @@ struct fastboot_download_work {
 	size_t size;
 };
 
-static void fastboot_work_fn(struct work *_work, int ssh_stdin)
+static void boot_work_fn(struct work *_work, int ssh_stdin)
 {
-	struct fastboot_download_work *work = container_of(_work, struct fastboot_download_work, work);
+	struct boot_download_work *work = container_of(_work, struct boot_download_work, work);
 	ssize_t left;
 	int ret;
 
 	left = MIN(2048, work->size - work->offset);
 
-	ret = abcd_send_buf(ssh_stdin, MSG_FASTBOOT_DOWNLOAD,
+	ret = abcd_send_buf(ssh_stdin, MSG_BOOT_DOWNLOAD,
 			    left,
 			    (char *)work->data + work->offset);
 	if (ret < 0 && errno == EAGAIN) {
 		list_add(&work_items, &_work->node);
 		return;
 	} else if (ret < 0) {
-		err(1, "failed to write fastboot message");
+		err(1, "failed to write boot message");
 	}
 
 	work->offset += left;
@@ -373,18 +372,18 @@ static void fastboot_work_fn(struct work *_work, int ssh_stdin)
 		list_add(&work_items, &_work->node);
 }
 
-static void request_fastboot_files(void)
+static void request_boot_files(void)
 {
-	struct fastboot_download_work *work;
+	struct boot_download_work *work;
 	struct stat sb;
 	int fd;
 
 	work = calloc(1, sizeof(*work));
-	work->work.fn = fastboot_work_fn;
+	work->work.fn = boot_work_fn;
 
-	fd = open(fastboot_file, O_RDONLY);
+	fd = open(boot_file, O_RDONLY);
 	if (fd < 0)
-		err(1, "failed to open \"%s\"", fastboot_file);
+		err(1, "failed to open \"%s\"", boot_file);
 
 	fstat(fd, &sb);
 
@@ -499,22 +498,22 @@ static int handle_message(struct circ_buf *buf)
 				request_power_on();
 			}
 			break;
-		case MSG_FASTBOOT_PRESENT:
+		case MSG_BOOT_PRESENT:
 			if (*(uint8_t*)msg->data) {
 				// printf("======================================== MSG_FASTBOOT_PRESENT(on)\n");
-				if (!fastboot_done || fastboot_repeat)
-					request_fastboot_files();
+				if (!boot_done)
+					request_boot_files();
 				else
 					quit = true;
 			} else {
-				fastboot_done = true;
+				boot_done = true;
 				// printf("======================================== MSG_FASTBOOT_PRESENT(off)\n");
 			}
 			break;
-		case MSG_FASTBOOT_DOWNLOAD:
+		case MSG_BOOT_DOWNLOAD:
 			// printf("======================================== MSG_FASTBOOT_DOWNLOAD\n");
 			break;
-		case MSG_FASTBOOT_BOOT:
+		case MSG_BOOT:
 			// printf("======================================== MSG_FASTBOOT_BOOT\n");
 			break;
 		case MSG_STATUS_UPDATE:
@@ -555,7 +554,7 @@ static void usage(void)
 	extern const char *__progname;
 
 	fprintf(stderr, "usage: %s -b <board> -h <host> [-t <timeout>] "
-			"[-T <inactivity-timeout>] boot.img\n",
+			"[-T <inactivity-timeout>] boot.bin\n",
 			__progname);
 	fprintf(stderr, "usage: %s -i -b <board> -h <host>\n",
 			__progname);
@@ -617,9 +616,6 @@ int main(int argc, char **argv)
 		case 'l':
 			verb = ABCD_LIST;
 			break;
-		case 'R':
-			fastboot_repeat = true;
-			break;
 		case 'S':
 			server_binary = optarg;
 			break;
@@ -642,11 +638,11 @@ int main(int argc, char **argv)
 		if (optind >= argc || !board)
 			usage();
 
-		fastboot_file = argv[optind];
-		if (lstat(fastboot_file, &sb))
-			err(1, "unable to read \"%s\"", fastboot_file);
+		boot_file = argv[optind];
+		if (lstat(boot_file, &sb))
+			err(1, "unable to read \"%s\"", boot_file);
 		if (!S_ISREG(sb.st_mode) && !S_ISLNK(sb.st_mode))
-			errx(1, "\"%s\" is not a regular file", fastboot_file);
+			errx(1, "\"%s\" is not a regular file", boot_file);
 
 		request_select_board(board);
 		break;
@@ -790,7 +786,7 @@ int main(int argc, char **argv)
 	tty_reset(orig_tios);
 
 	if (reached_timeout)
-		return fastboot_done ? 110 : 2;
+		return boot_done ? 110 : 2;
 
 	return (quit || received_power_off) ? 0 : 1;
 }

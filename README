@@ -1,6 +1,5 @@
 = ABCD control tool
-The ABCD control tool is used for remotely booting images on development boards
-attached using a CDB Assist [https://github.com/sonyxperiadev/CDB-Assist] or Conmux.
+The ABCD control tool is used for remotely booting Amlogic TF-A images on development boards
 
 = Dependencies
 sudo apt-get install libudev-dev libyaml-dev libftdi1-dev pkg-config meson for debian systems
@@ -18,7 +17,7 @@ from sandbox/abcd/abcd-server. Available devices are read from $HOME/.abcd
 = Client side
 The client is invoked as:
 
-  abcd -b <board> -h <host> [-c <power-cylce-count>] boot.img
+  abcd -b <board> -h <host> [-c <power-cylce-count>] u-boot.bin
 
 <host> will be connected to using ssh and <board> will be selected for
 operation. As the board's fastboot interface shows up the given boot.img will
