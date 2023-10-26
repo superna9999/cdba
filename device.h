@@ -11,6 +11,7 @@ struct boot_ops;
 enum boot_stage {
 	BOOT_NONE = 0,
 	BOOT_PYAMLBOOT,
+	BOOT_DFU,
 };
 
 struct device {

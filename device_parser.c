@@ -125,6 +125,8 @@ static void parse_board(struct device_parser *dp)
 
 					if (!strcmp(key, "pyamlboot")) {
 						boot_stage_type = BOOT_PYAMLBOOT;
+					} else if (!strcmp(key, "dfu")) {
+						boot_stage_type = BOOT_DFU;
 					} else {
 						fprintf(stderr, "device parser: Unknown boot stage '%s'\n", key);
 					}

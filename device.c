@@ -44,6 +44,7 @@
 #include "device.h"
 #include "boot.h"
 #include "pyamlboot.h"
+#include "dfu.h"
 #include "console.h"
 #include "list.h"
 #include "ppps.h"
@@ -120,6 +121,9 @@ static void device_open_boot(struct device *device)
 	case BOOT_PYAMLBOOT:
 		boot_stage_data = pyamlboot_open(device, device->boot_ops, boot_stage_options);
 		break;
+	case BOOT_DFU:
+		boot_stage_data = dfu_open(device, device->boot_ops, boot_stage_options);
+		break;
 	default:
 		errx(1, "No boot type defined for stage %u", device->boot_stage);
 	}
@@ -138,6 +142,9 @@ void device_boot(struct device *device, const void *data, size_t len)
 	switch (device->boot_stages[device->boot_stage]) {
 	case BOOT_PYAMLBOOT:
 		pyamlboot_close(device, boot_stage_data);
+		break;
+	case BOOT_DFU:
+		dfu_close(device, boot_stage_data);
 		break;
 	default:
 		errx(1, "No boot type defined for stage %u", device->boot_stage);
