@@ -38,12 +38,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 
-#include "cdba-server.h"
+#include "abcd-server.h"
 #include "device.h"
-#include "fastboot.h"
+#include "boot.h"
+#include "pyamlboot.h"
+#include "dfu.h"
 #include "console.h"
 #include "list.h"
+#include "ppps.h"
 
 #define ARRAY_SIZE(x) ((sizeof(x)/sizeof((x)[0])))
 
@@ -60,8 +64,8 @@ static void device_lock(struct device *device)
 	int fd;
 	int n;
 
-	n = snprintf(lock, sizeof(lock), "/tmp/cdba-%s.lock", device->board);
-	if (n >= sizeof(lock))
+	n = snprintf(lock, sizeof(lock), "/tmp/abcd-%s.lock", device->board);
+	if (n >= (int)sizeof(lock))
 		errx(1, "failed to build lockfile path");
 
 	fd = open(lock, O_RDONLY | O_CREAT, 0666);
@@ -83,8 +87,84 @@ static void device_lock(struct device *device)
 		err(1, "failed to lock lockfile %s", lock);
 }
 
+static bool device_check_access(struct device *device,
+				const char *username)
+{
+	struct device_user *user;
+
+	if (!device->users)
+		return true;
+
+	if (!username)
+		return false;
+
+	list_for_each_entry(user, device->users, node) {
+		if (!strcmp(user->username, username))
+			return true;
+	}
+
+	return false;
+}
+
+static void device_open_boot(struct device *device)
+{
+	void *boot_stage_data;
+	char *boot_stage_options;
+
+	if (device->boot_stage >= MAX_BOOT_STAGES ||
+	    device->boot_stage >= device->boot_num_stages)
+		return;
+
+	boot_stage_options = device->boot_stage_options[device->boot_stage];
+
+	switch (device->boot_stages[device->boot_stage]) {
+	case BOOT_PYAMLBOOT:
+		boot_stage_data = pyamlboot_open(device, device->boot_ops, boot_stage_options);
+		break;
+	case BOOT_DFU:
+		boot_stage_data = dfu_open(device, device->boot_ops, boot_stage_options);
+		break;
+	default:
+		errx(1, "No boot type defined for stage %u", device->boot_stage);
+	}
+
+	device->boot_stage_data[device->boot_stage] = boot_stage_data;
+}
+
+void device_boot(struct device *device, const void *data, size_t len)
+{
+	void *boot_stage_data = device->boot_stage_data[device->boot_stage];
+
+	warnx("booting the board...");
+
+	device->do_boot(boot_stage_data, data, len);
+
+	switch (device->boot_stages[device->boot_stage]) {
+	case BOOT_PYAMLBOOT:
+		pyamlboot_close(device, boot_stage_data);
+		break;
+	case BOOT_DFU:
+		dfu_close(device, boot_stage_data);
+		break;
+	default:
+		errx(1, "No boot type defined for stage %u", device->boot_stage);
+	}
+
+	device->do_boot = NULL;
+
+	/* Increase boot stage */
+	++device->boot_stage;
+
+	if (device->boot_stage >= MAX_BOOT_STAGES ||
+	    device->boot_stage >= device->boot_num_stages)
+		return;
+
+	device_open_boot(device);
+}
+
 struct device *device_open(const char *board,
-			   struct fastboot_ops *fastboot_ops)
+			   const char *username,
+			   struct boot_ops *boot_ops)
 {
 	struct device *device;
 
@@ -97,6 +177,9 @@ struct device *device_open(const char *board,
 
 found:
 	assert(device->open || device->console_dev);
+
+	if (!device_check_access(device, username))
+		return NULL;
 
 	device_lock(device);
 
@@ -112,7 +195,9 @@ found:
 	if (device->usb_always_on)
 		device_usb(device, true);
 
-	device->fastboot = fastboot_open(device->serial, fastboot_ops, NULL);
+	device->boot_ops = boot_ops;
+
+	device_open_boot(device);
 
 	return device;
 }
@@ -133,7 +218,7 @@ enum {
 	DEVICE_STATE_CONNECT,
 	DEVICE_STATE_PRESS,
 	DEVICE_STATE_RELEASE_PWR,
-	DEVICE_STATE_RELEASE_FASTBOOT,
+	DEVICE_STATE_RELEASE_BOOT,
 	DEVICE_STATE_RUNNING,
 };
 
@@ -143,9 +228,8 @@ static void device_tick(void *data)
 
 	switch (device->state) {
 	case DEVICE_STATE_START:
-		/* Make sure power key is not engaged */
-		if (device->fastboot_key_timeout)
-			device_key(device, DEVICE_KEY_FASTBOOT, true);
+		if (device->boot_key_timeout)
+			device_key(device, DEVICE_KEY_BOOT, true);
 		if (device->has_power_key)
 			device_key(device, DEVICE_KEY_POWER, false);
 
@@ -160,9 +244,9 @@ static void device_tick(void *data)
 		if (device->has_power_key) {
 			device->state = DEVICE_STATE_PRESS;
 			watch_timer_add(250, device_tick, device);
-		} else if (device->fastboot_key_timeout) {
-			device->state = DEVICE_STATE_RELEASE_FASTBOOT;
-			watch_timer_add(device->fastboot_key_timeout * 1000, device_tick, device);
+		} else if (device->boot_key_timeout) {
+			device->state = DEVICE_STATE_RELEASE_BOOT;
+			watch_timer_add(device->boot_key_timeout * 1000, device_tick, device);
 		} else {
 			device->state = DEVICE_STATE_RUNNING;
 		}
@@ -178,15 +262,15 @@ static void device_tick(void *data)
 		/* Release power key */
 		device_key(device, DEVICE_KEY_POWER, false);
 
-		if (device->fastboot_key_timeout) {
-			device->state = DEVICE_STATE_RELEASE_FASTBOOT;
-			watch_timer_add(device->fastboot_key_timeout * 1000, device_tick, device);
+		if (device->boot_key_timeout) {
+			device->state = DEVICE_STATE_RELEASE_BOOT;
+			watch_timer_add(device->boot_key_timeout * 1000, device_tick, device);
 		} else {
 			device->state = DEVICE_STATE_RUNNING;
 		}
 		break;
-	case DEVICE_STATE_RELEASE_FASTBOOT:
-		device_key(device, DEVICE_KEY_FASTBOOT, false);
+	case DEVICE_STATE_RELEASE_BOOT:
+		device_key(device, DEVICE_KEY_BOOT, false);
 		device->state = DEVICE_STATE_RUNNING;
 		break;
 	}
@@ -229,8 +313,12 @@ void device_print_status(struct device *device)
 
 void device_usb(struct device *device, bool on)
 {
-	if (device->usb)
-		device->usb(device, on);
+	if (device->usb) {
+		if (device->ppps_path)
+			ppps_power(device, on);
+		else
+			device->usb(device, on);
+	}
 }
 
 int device_write(struct device *device, const void *buf, size_t len)
@@ -243,76 +331,54 @@ int device_write(struct device *device, const void *buf, size_t len)
 	return device->write(device, buf, len);
 }
 
-void device_fastboot_boot(struct device *device)
-{
-	fastboot_boot(device->fastboot);
-}
-
-void device_fastboot_flash_reboot(struct device *device)
-{
-	fastboot_flash(device->fastboot, "boot");
-	fastboot_reboot(device->fastboot);
-}
-
-void device_boot(struct device *device, const void *data, size_t len)
-{
-	warnx("booting the board...");
-	if (device->set_active)
-		fastboot_set_active(device->fastboot, "a");
-	fastboot_download(device->fastboot, data, len);
-	device->boot(device);
-}
-
 void device_send_break(struct device *device)
 {
 	if (device->send_break)
 		device->send_break(device);
 }
 
-void device_list_devices(void)
+void device_list_devices(const char *username)
 {
 	struct device *device;
-	struct msg hdr;
 	size_t len;
 	char buf[80];
 
 	list_for_each_entry(device, &devices, node) {
+		if (!device_check_access(device, username))
+			continue;
+
 		if (device->name)
 			len = snprintf(buf, sizeof(buf), "%-20s %s", device->board, device->name);
 		else
 			len = snprintf(buf, sizeof(buf), "%s", device->board);
 
-		hdr.type = MSG_LIST_DEVICES;
-		hdr.len = len;
-		write(STDOUT_FILENO, &hdr, sizeof(hdr));
-		write(STDOUT_FILENO, buf, len);
+		abcd_send_buf(MSG_LIST_DEVICES, len, buf);
 	}
 
-	hdr.type = MSG_LIST_DEVICES;
-	hdr.len = 0;
-	write(STDOUT_FILENO, &hdr, sizeof(hdr));
+	abcd_send_buf(MSG_LIST_DEVICES, 0, NULL);
 }
 
-void device_info(const void *data, size_t dlen)
+void device_info(const char *username, const void *data, size_t dlen)
 {
+	char *description = NULL;
 	struct device *device;
-	struct msg hdr;
-	char *description;
 	size_t len = 0;
 
 	list_for_each_entry(device, &devices, node) {
-		if (!strncmp(device->board, data, dlen) && device->description) {
+		if (strncmp(device->board, data, dlen))
+			continue;
+
+		if (!device_check_access(device, username))
+			continue;
+
+		if (device->description) {
 			description = device->description;
 			len = strlen(device->description);
 			break;
 		}
 	}
 
-	hdr.type = MSG_BOARD_INFO;
-	hdr.len = len;
-	write(STDOUT_FILENO, &hdr, sizeof(hdr));
-	if (len)
-		write(STDOUT_FILENO, description, len);
+	abcd_send_buf(MSG_BOARD_INFO, len, description);
 }
 
 void device_close(struct device *dev)

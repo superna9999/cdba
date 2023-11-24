@@ -45,8 +45,7 @@
  */
 ssize_t circ_fill(int fd, struct circ_buf *circ)
 {
-	size_t space;
-	size_t count = 0;
+	ssize_t space;
 	ssize_t n = 0;
 
 	do {
@@ -62,8 +61,6 @@ ssize_t circ_fill(int fd, struct circ_buf *circ)
 			return -1;
 		} else if (n < 0)
 			return -1;
-
-		count += n;
 
 		circ->head = (circ->head + n) & (CIRC_BUF_SIZE - 1);
 	} while (n != space);
@@ -85,7 +82,7 @@ size_t circ_peak(struct circ_buf *circ, void *buf, size_t len)
 		tail = (tail + 1) & (CIRC_BUF_SIZE - 1);
 	}
 
-	return (void*)p - buf;
+	return p - (char *)buf;
 }
 
 size_t circ_read(struct circ_buf *circ, void *buf, size_t len)
@@ -101,5 +98,5 @@ size_t circ_read(struct circ_buf *circ, void *buf, size_t len)
 		circ->tail = (circ->tail + 1) & (CIRC_BUF_SIZE - 1);
 	}
 
-	return (void*)p - buf;
+	return p - (char *)buf;
 }

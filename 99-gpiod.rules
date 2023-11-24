@@ -1,0 +1,1 @@
+SUBSYSTEM=="gpio", KERNEL=="gpiochip0", GROUP="plugdev", MODE="0660"

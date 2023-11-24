@@ -17,14 +17,14 @@ git cat-file -p main:keydir | while read LINE; do
 
     USER=$(basename $NAME .pub)
     PUBKEY=$(git cat-file blob main:keydir/$NAME)
-    echo "command=\"$HOME/bin/cdba-shell $USER\" $PUBKEY" >> $AUTHORIZED_TMP
+    echo "command=\"$HOME/bin/abcd-shell $USER\" $PUBKEY" >> $AUTHORIZED_TMP
 done
 mv $AUTHORIZED_TMP $AUTHORIZED_KEYS
 
 #
-# Install .cdba
+# Install .abcd
 #
-git cat-file blob main:cdba > $HOME/.cdba
+git cat-file blob main:abcd > $HOME/.abcd
 
 #
 # Install admins list

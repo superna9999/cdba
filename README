@@ -1,19 +1,26 @@
-= CDBA control tool
-The CDBA control tool is used for remotely booting images on development boards
-attached using a CDB Assist [https://github.com/sonyxperiadev/CDB-Assist] or Conmux.
+= ABCD control tool
+The ABCD control tool is used for remotely booting Amlogic TF-A images on development boards
+
+This is a friendly fork on CDBA (https://github.com/linux-msm/cdba) for the only
+purpose to boot amlogic bootloader to run the U-Boot test suite.
 
 = Dependencies
-sudo apt-get install libudev-dev libyaml-dev for debian systems
-dnf install systemd-devel libyaml-devel for fedora systems
+sudo apt-get install libudev-dev libyaml-dev libftdi1-dev pkg-config meson for debian systems
+dnf install systemd-devel libyaml-devel libftdi1-devel pkg-config meson for fedora systems
 
 = Device side
-On the host with the CDB Assist or Conmux attached the "cdba-server" executable is run
-from sandbox/cdba/cdba-server. Available devices are read from $HOME/.cdba
+On the host with the CDB Assist or Conmux attached the "abcd-server" executable is run
+from sandbox/abcd/abcd-server. Available devices are read from $HOME/.abcd
+
+= Build instructions
+
+# meson . build
+# ninja -C build
 
 = Client side
 The client is invoked as:
 
-  cdba -b <board> -h <host> [-c <power-cylce-count>] boot.img
+  abcd -b <board> -h <host> [-c <power-cylce-count>] u-boot.bin
 
 <host> will be connected to using ssh and <board> will be selected for
 operation. As the board's fastboot interface shows up the given boot.img will
@@ -27,12 +34,12 @@ restart the board the given number of times. Each time booting the given
 boot.img.
 
 == Device configuration
-The list of attached devices is read from $HOME/.cdba and is YAML formatted.
+The list of attached devices is read from $HOME/.abcd and is YAML formatted.
 
 === Example
 devices:
   - board: db2k
-    cdba: 00000001
+    abcd: 00000001
     name: "DragonBoard2k"
     fastboot: abcdef1
     voltage: 8000
@@ -43,6 +50,16 @@ devices:
     fastboot_set_active: true
 
   - board: evb2k
+    users:
+      - username
     console: /dev/ttyUSB0
     fastboot: abcdef3
     fastboot_set_active: true
+
+  - board: qrd8550
+    alpaca: /dev/serial/by-id/usb-QUALCOMM_Inc._Embedded_Power_Measurement__EPM__device_6E02020620151F14-if01
+    console: /dev/serial/by-id/usb-QUALCOMM_MTP_Debug_Board_MT77TGG2-if00-port0
+    name: QRD8550
+    fastboot: 91671140
+    fastboot_set_active: true
+    fastboot_key_timeout: 2

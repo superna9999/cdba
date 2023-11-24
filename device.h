@@ -4,26 +4,39 @@
 #include <termios.h>
 #include "list.h"
 
-struct cdb_assist;
-struct fastboot;
-struct fastboot_ops;
+struct boot_ops;
+
+#define MAX_BOOT_STAGES  4
+
+enum boot_stage {
+	BOOT_NONE = 0,
+	BOOT_PYAMLBOOT,
+	BOOT_DFU,
+};
 
 struct device {
 	char *board;
 	char *control_dev;
 	char *console_dev;
 	char *name;
-	char *serial;
 	char *description;
+	char *ppps_path;
+	struct list_head *users;
 	unsigned voltage;
 	bool tickle_mmc;
 	bool usb_always_on;
-	struct fastboot *fastboot;
-	unsigned int fastboot_key_timeout;
+	
+	unsigned int boot_key_timeout;
 	int state;
 	bool has_power_key;
 
-	void (*boot)(struct device *);
+	struct boot_ops *boot_ops;
+	char *boot_stage_options[MAX_BOOT_STAGES];
+	void *boot_stage_data[MAX_BOOT_STAGES];
+	enum boot_stage boot_stages[MAX_BOOT_STAGES];
+	unsigned int boot_num_stages;
+	unsigned int boot_stage;
+	int (*do_boot)(void *boot_data, const void *data, size_t len);
 
 	void *(*open)(struct device *dev);
 	void (*close)(struct device *dev);
@@ -31,11 +44,10 @@ struct device {
 	void (*usb)(struct device *dev, bool on);
 	void (*print_status)(struct device *dev);
 	int (*write)(struct device *dev, const void *buf, size_t len);
-	void (*fastboot_key)(struct device *dev, bool on);
+	void (*boot_key)(struct device *dev, bool on);
 	void (*key)(struct device *device, int key, bool asserted);
 
 	void (*send_break)(struct device *dev);
-	bool set_active;
 
 	void *cdb;
 
@@ -45,9 +57,17 @@ struct device {
 	struct list_head node;
 };
 
+struct device_user {
+	const char *username;
+
+	struct list_head node;
+};
+
 void device_add(struct device *device);
 
-struct device *device_open(const char *board, struct fastboot_ops *fastboot_ops);
+struct device *device_open(const char *board,
+			   const char *username,
+			   struct boot_ops *boot_ops);
 void device_close(struct device *dev);
 int device_power(struct device *device, bool on);
 
@@ -57,14 +77,12 @@ int device_write(struct device *device, const void *buf, size_t len);
 
 void device_boot(struct device *device, const void *data, size_t len);
 
-void device_fastboot_boot(struct device *device);
-void device_fastboot_flash_reboot(struct device *device);
 void device_send_break(struct device *device);
-void device_list_devices(void);
-void device_info(const void *data, size_t dlen);
+void device_list_devices(const char *username);
+void device_info(const char *username, const void *data, size_t dlen);
 
 enum {
-	DEVICE_KEY_FASTBOOT,
+	DEVICE_KEY_BOOT,
 	DEVICE_KEY_POWER,
 };
 

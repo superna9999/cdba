@@ -44,15 +44,18 @@
 #include <termios.h>
 #include <unistd.h>
 
-#include "cdba.h"
+#include "abcd.h"
 #include "circ_buf.h"
 #include "list.h"
 
-static bool quit;
-static bool fastboot_repeat;
-static bool fastboot_done;
+#define MAX_BOOT_FILES	4
 
-static const char *fastboot_file;
+static bool quit;
+static bool boot_done;
+
+static const char *boot_files[MAX_BOOT_FILES];
+static unsigned int boot_num_stages;
+static unsigned int boot_stage;
 
 static struct termios *tty_unbuffer(void)
 {
@@ -144,10 +147,30 @@ static int fork_ssh(const char *host, const char *cmd, int *pipes)
 	return 0;
 }
 
+#define abcd_send(fd, type) abcd_send_buf(fd, type, 0, NULL)
+static int abcd_send_buf(int fd, int type, size_t len, const void *buf)
+{
+	int ret;
+
+	struct msg msg = {
+		.type = type,
+		.len = len
+	};
+
+	ret = write(fd, &msg, sizeof(msg));
+	if (ret < 0)
+		return ret;
+
+	if (len)
+		ret = write(fd, buf, len);
+
+	return ret < 0 ? ret : 0;
+}
+
 static int tty_callback(int *ssh_fds)
 {
+	static const char ctrl_a = 0x1;
 	static bool special;
-	struct msg hdr;
 	char buf[32];
 	ssize_t k;
 	ssize_t n;
@@ -157,7 +180,7 @@ static int tty_callback(int *ssh_fds)
 		return n;
 
 	for (k = 0; k < n; k++) {
-		if (buf[k] == 0x1) {
+		if (buf[k] == ctrl_a) {
 			special = true;
 		} else if (special) {
 			switch (buf[k]) {
@@ -165,51 +188,31 @@ static int tty_callback(int *ssh_fds)
 				quit = true;
 				break;
 			case 'P':
-				hdr.type = MSG_POWER_ON;
-				hdr.len = 0;
-				write(ssh_fds[0], &hdr, sizeof(hdr));
+				abcd_send(ssh_fds[0], MSG_POWER_ON);
 				break;
 			case 'p':
-				hdr.type = MSG_POWER_OFF;
-				hdr.len = 0;
-				write(ssh_fds[0], &hdr, sizeof(hdr));
+				abcd_send(ssh_fds[0], MSG_POWER_OFF);
 				break;
 			case 's':
-				hdr.type = MSG_STATUS_UPDATE;
-				hdr.len = 0;
-				write(ssh_fds[0], &hdr, sizeof(hdr));
+				abcd_send(ssh_fds[0], MSG_STATUS_UPDATE);
 				break;
 			case 'V':
-				hdr.type = MSG_VBUS_ON;
-				hdr.len = 0;
-				write(ssh_fds[0], &hdr, sizeof(hdr));
+				abcd_send(ssh_fds[0], MSG_VBUS_ON);
 				break;
 			case 'v':
-				hdr.type = MSG_VBUS_OFF;
-				hdr.len = 0;
-				write(ssh_fds[0], &hdr, sizeof(hdr));
+				abcd_send(ssh_fds[0], MSG_VBUS_OFF);
 				break;
 			case 'a':
-				hdr.type = MSG_CONSOLE;
-				hdr.len = 1;
-
-				write(ssh_fds[0], &hdr, sizeof(hdr));
-				write(ssh_fds[0], "\001", 1);
+				abcd_send_buf(ssh_fds[0], MSG_CONSOLE, 1, &ctrl_a);
 				break;
 			case 'B':
-				hdr.type = MSG_SEND_BREAK;
-				hdr.len = 0;
-				write(ssh_fds[0], &hdr, sizeof(hdr));
+				abcd_send(ssh_fds[0], MSG_SEND_BREAK);
 				break;
 			}
 
 			special = false;
 		} else {
-			hdr.type = MSG_CONSOLE;
-			hdr.len = 1;
-
-			write(ssh_fds[0], &hdr, sizeof(hdr));
-			write(ssh_fds[0], buf + k, 1);
+			abcd_send_buf(ssh_fds[0], MSG_CONSOLE, 1, buf + k);
 		}
 	}
 
@@ -226,14 +229,10 @@ static struct list_head work_items = LIST_INIT(work_items);
 
 static void list_boards_fn(struct work *work, int ssh_stdin)
 {
-	struct msg msg;
-	ssize_t n;
+	int ret;
 
-	msg.type = MSG_LIST_DEVICES;
-	msg.len = 0;
-
-	n = write(ssh_stdin, &msg, sizeof(msg));
-	if (n < 0)
+	ret = abcd_send(ssh_stdin, MSG_LIST_DEVICES);
+	if (ret < 0)
 		err(1, "failed to send board list request");
 
 	free(work);
@@ -257,17 +256,12 @@ struct board_info_request {
 static void board_info_fn(struct work *work, int ssh_stdin)
 {
 	struct board_info_request *board = container_of(work, struct board_info_request, work);
-	size_t blen = strlen(board->board) + 1;
-	struct msg *msg;
-	ssize_t n;
+	int ret;
 
-	msg = alloca(sizeof(*msg) + blen);
-	msg->type = MSG_BOARD_INFO;
-	msg->len = blen;
-	memcpy(msg->data, board->board, blen);
-
-	n = write(ssh_stdin, msg, sizeof(*msg) + blen);
-	if (n < 0)
+	ret = abcd_send_buf(ssh_stdin, MSG_BOARD_INFO,
+			    strlen(board->board) + 1,
+			    board->board);
+	if (ret < 0)
 		err(1, "failed to send board info request");
 
 	free(work);
@@ -293,17 +287,12 @@ struct select_board {
 static void select_board_fn(struct work *work, int ssh_stdin)
 {
 	struct select_board *board = container_of(work, struct select_board, work);
-	size_t blen = strlen(board->board) + 1;
-	struct msg *msg;
-	ssize_t n;
+	int ret;
 
-	msg = alloca(sizeof(*msg) + blen);
-	msg->type = MSG_SELECT_BOARD;
-	msg->len = blen;
-	memcpy(msg->data, board->board, blen);
-
-	n = write(ssh_stdin, msg, sizeof(*msg) + blen);
-	if (n < 0)
+	ret = abcd_send_buf(ssh_stdin, MSG_SELECT_BOARD,
+			    strlen(board->board) + 1,
+			    board->board);
+	if (ret < 0)
 		err(1, "failed to send power on request");
 
 	free(work);
@@ -322,21 +311,19 @@ static void request_select_board(const char *board)
 
 static void request_power_on_fn(struct work *work, int ssh_stdin)
 {
-	struct msg msg = { MSG_POWER_ON, };
-	ssize_t n;
+	int ret;
 
-	n = write(ssh_stdin, &msg, sizeof(msg));
-	if (n < 0)
+	ret = abcd_send(ssh_stdin, MSG_POWER_ON);
+	if (ret < 0)
 		err(1, "failed to send power on request");
 }
 
 static void request_power_off_fn(struct work *work, int ssh_stdin)
 {
-	struct msg msg = { MSG_POWER_OFF, };
-	ssize_t n;
+	int ret;
 
-	n = write(ssh_stdin, &msg, sizeof(msg));
-	if (n < 0)
+	ret = abcd_send(ssh_stdin, MSG_POWER_OFF);
+	if (ret < 0)
 		err(1, "failed to send power off request");
 }
 
@@ -354,7 +341,7 @@ static void request_power_off(void)
 	list_add(&work_items, &work.node);
 }
 
-struct fastboot_download_work {
+struct boot_download_work {
 	struct work work;
 
 	void *data;
@@ -362,49 +349,51 @@ struct fastboot_download_work {
 	size_t size;
 };
 
-static void fastboot_work_fn(struct work *_work, int ssh_stdin)
+static void boot_work_fn(struct work *_work, int ssh_stdin)
 {
-	struct fastboot_download_work *work = container_of(_work, struct fastboot_download_work, work);
-	struct msg *msg;
-	size_t left;
-	ssize_t n;
+	struct boot_download_work *work = container_of(_work, struct boot_download_work, work);
+	ssize_t left;
+	int ret;
 
 	left = MIN(2048, work->size - work->offset);
 
-	msg = alloca(sizeof(*msg) + left);
-	msg->type = MSG_FASTBOOT_DOWNLOAD;
-	msg->len = left;
-	memcpy(msg->data, work->data + work->offset, left);
-
-	n = write(ssh_stdin, msg, sizeof(*msg) + msg->len);
-	if (n < 0 && errno == EAGAIN) {
+	ret = abcd_send_buf(ssh_stdin, MSG_BOOT_DOWNLOAD, left,
+			    (char *)work->data + work->offset);
+	if (ret < 0 && errno == EAGAIN) {
 		list_add(&work_items, &_work->node);
 		return;
-	} else if (n < 0) {
-		err(1, "failed to write fastboot message");
+	} else if (ret < 0) {
+		err(1, "failed to write boot message");
 	}
 
-	work->offset += msg->len;
+	work->offset += left;
 
 	/* We've sent the entire image, and a zero length packet */
-	if (!msg->len)
+	if (!left)
 		free(work);
 	else
 		list_add(&work_items, &_work->node);
 }
 
-static void request_fastboot_files(void)
+static void request_boot_files(void)
 {
-	struct fastboot_download_work *work;
+	struct boot_download_work *work;
 	struct stat sb;
 	int fd;
 
-	work = calloc(1, sizeof(*work));
-	work->work.fn = fastboot_work_fn;
+	if (boot_stage >= boot_num_stages) {
+		errx(1, "Boot stage %u doesn't have a boot file",
+		     boot_stage);
 
-	fd = open(fastboot_file, O_RDONLY);
+		return;
+	}
+
+	work = calloc(1, sizeof(*work));
+	work->work.fn = boot_work_fn;
+
+	fd = open(boot_files[boot_stage], O_RDONLY);
 	if (fd < 0)
-		err(1, "failed to open \"%s\"", fastboot_file);
+		err(1, "failed to open \"%s\"", boot_files[boot_stage]);
 
 	fstat(fd, &sb);
 
@@ -453,6 +442,7 @@ static void handle_board_info(const void *data, size_t len)
 	quit = true;
 }
 
+static int power_cycles = -1;
 static bool received_power_off;
 static bool reached_timeout;
 
@@ -462,7 +452,8 @@ static void handle_console(const void *data, size_t len)
 	const char *p = data;
 	int i;
 
-	for (i = 0; i < len; i++) {
+	/* Don't process the line by default (power_cycles = -1) */
+	for (i = 0; i < len && power_cycles >= 0; i++) {
 		if (*p++ == '~') {
 			if (power_off_chars++ == 19) {
 				received_power_off = true;
@@ -517,22 +508,26 @@ static int handle_message(struct circ_buf *buf)
 				request_power_on();
 			}
 			break;
-		case MSG_FASTBOOT_PRESENT:
+		case MSG_BOOT_PRESENT:
 			if (*(uint8_t*)msg->data) {
 				// printf("======================================== MSG_FASTBOOT_PRESENT(on)\n");
-				if (!fastboot_done || fastboot_repeat)
-					request_fastboot_files();
+				if (!boot_done)
+					request_boot_files();
 				else
 					quit = true;
 			} else {
-				fastboot_done = true;
+				++boot_stage;
+				warnx("new boot_stage: %u\n", boot_stage);
+
+				if (boot_stage >= boot_num_stages)
+					boot_done = true;
 				// printf("======================================== MSG_FASTBOOT_PRESENT(off)\n");
 			}
 			break;
-		case MSG_FASTBOOT_DOWNLOAD:
+		case MSG_BOOT_DOWNLOAD:
 			// printf("======================================== MSG_FASTBOOT_DOWNLOAD\n");
 			break;
-		case MSG_FASTBOOT_BOOT:
+		case MSG_BOOT:
 			// printf("======================================== MSG_FASTBOOT_BOOT\n");
 			break;
 		case MSG_STATUS_UPDATE:
@@ -573,7 +568,7 @@ static void usage(void)
 	extern const char *__progname;
 
 	fprintf(stderr, "usage: %s -b <board> -h <host> [-t <timeout>] "
-			"[-T <inactivity-timeout>] boot.img\n",
+			"[-T <inactivity-timeout>] boot.bin [boot2.bin [bootX.bin [...]]]\n",
 			__progname);
 	fprintf(stderr, "usage: %s -i -b <board> -h <host>\n",
 			__progname);
@@ -583,9 +578,9 @@ static void usage(void)
 }
 
 enum {
-	CDBA_BOOT,
-	CDBA_LIST,
-	CDBA_INFO,
+	ABCD_BOOT,
+	ABCD_LIST,
+	ABCD_INFO,
 };
 
 int main(int argc, char **argv)
@@ -594,7 +589,7 @@ int main(int argc, char **argv)
 	struct timeval timeout_inactivity_tv;
 	struct timeval timeout_total_tv;
 	struct termios *orig_tios;
-	const char *server_binary = "cdba-server";
+	const char *server_binary = "abcd-server";
 	int timeout_inactivity = 0;
 	int timeout_total = 600;
 	struct work *next;
@@ -604,7 +599,6 @@ int main(int argc, char **argv)
 	const char *host = NULL;
 	struct timeval now;
 	struct timeval tv;
-	int power_cycles = 0;
 	struct stat sb;
 	int ssh_fds[3];
 	char buf[128];
@@ -612,7 +606,7 @@ int main(int argc, char **argv)
 	fd_set wfds;
 	ssize_t n;
 	int nfds;
-	int verb = CDBA_BOOT;
+	int verb = ABCD_BOOT;
 	int opt;
 	int ret;
 
@@ -631,13 +625,10 @@ int main(int argc, char **argv)
 			host = optarg;
 			break;
 		case 'i':
-			verb = CDBA_INFO;
+			verb = ABCD_INFO;
 			break;
 		case 'l':
-			verb = CDBA_LIST;
-			break;
-		case 'R':
-			fastboot_repeat = true;
+			verb = ABCD_LIST;
 			break;
 		case 'S':
 			server_binary = optarg;
@@ -657,22 +648,29 @@ int main(int argc, char **argv)
 		usage();
 
 	switch (verb) {
-	case CDBA_BOOT:
+	case ABCD_BOOT:
 		if (optind >= argc || !board)
 			usage();
 
-		fastboot_file = argv[optind];
-		if (lstat(fastboot_file, &sb))
-			err(1, "unable to read \"%s\"", fastboot_file);
-		if (!S_ISREG(sb.st_mode) && !S_ISLNK(sb.st_mode))
-			errx(1, "\"%s\" is not a regular file", fastboot_file);
+		while (optind < argc) {
+			boot_files[boot_num_stages] = argv[optind];
+			if (lstat(boot_files[boot_num_stages], &sb))
+				err(1, "unable to read \"%s\"",
+				    boot_files[boot_num_stages]);
+			if (!S_ISREG(sb.st_mode) && !S_ISLNK(sb.st_mode))
+				errx(1, "\"%s\" is not a regular file",
+				     boot_files[boot_num_stages]);
+
+			++optind;
+			++boot_num_stages;
+		}
 
 		request_select_board(board);
 		break;
-	case CDBA_LIST:
+	case ABCD_LIST:
 		request_board_list();
 		break;
-	case CDBA_INFO:
+	case ABCD_INFO:
 		if (!board)
 			usage();
 
@@ -691,7 +689,7 @@ int main(int argc, char **argv)
 
 	while (!quit) {
 		if (received_power_off || reached_timeout) {
-			if (!power_cycles)
+			if (power_cycles <= 0)
 				break;
 
 			if (reached_timeout && !power_cycle_on_timeout)
@@ -801,7 +799,7 @@ int main(int argc, char **argv)
 	close(ssh_fds[1]);
 	close(ssh_fds[2]);
 
-	if (verb == CDBA_BOOT)
+	if (verb == ABCD_BOOT)
 		printf("Waiting for ssh to finish\n");
 
 	wait(NULL);
@@ -809,7 +807,7 @@ int main(int argc, char **argv)
 	tty_reset(orig_tios);
 
 	if (reached_timeout)
-		return fastboot_done ? 110 : 2;
+		return boot_done ? 110 : 2;
 
 	return (quit || received_power_off) ? 0 : 1;
 }

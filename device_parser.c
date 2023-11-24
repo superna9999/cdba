@@ -33,11 +33,11 @@
 #include <yaml.h>
 
 #include "device.h"
-#include "alpaca.h"
-#include "cdb_assist.h"
+#include "ftdi-gpio.h"
+#include "local-gpio.h"
 #include "conmux.h"
 #include "console.h"
-#include "qcomlt_dbg.h"
+#include "ppps.h"
 
 #define TOKEN_LENGTH	16384
 
@@ -49,7 +49,7 @@ struct device_parser {
 static void nextsym(struct device_parser *dp)
 {
 	if (!yaml_parser_parse(&dp->parser, &dp->event)) {
-		fprintf(stderr, "device parser: error %d\n", dp->parser.error);
+		fprintf(stderr, "device parser: error %u\n", dp->parser.error);
 		exit(1);
 	}
 }
@@ -76,7 +76,7 @@ static bool expect(struct device_parser *dp, int type, char *scalar)
 		return true;
 	}
 
-	fprintf(stderr, "device parser: expected %d got %d\n", type, dp->event.type);
+	fprintf(stderr, "device parser: expected %d got %u\n", type, dp->event.type);
 	exit(1);
 }
 
@@ -89,70 +89,107 @@ static void parse_board(struct device_parser *dp)
 	dev = calloc(1, sizeof(*dev));
 
 	while (accept(dp, YAML_SCALAR_EVENT, key)) {
+		if (!strcmp(key, "users")) {
+			dev->users = calloc(1, sizeof(*dev->users));
+			list_init(dev->users);
+
+			if (accept(dp, YAML_SCALAR_EVENT, value))
+				continue;
+
+			expect(dp, YAML_SEQUENCE_START_EVENT, NULL);
+
+			while (accept(dp, YAML_SCALAR_EVENT, key)) {
+				struct device_user *user = calloc(1, sizeof(*user));
+
+				user->username = strdup(key);
+
+				list_add(dev->users, &user->node);
+			}
+
+			expect(dp, YAML_SEQUENCE_END_EVENT, NULL);
+
+			continue;
+		}
+		
+		if (!strcmp(key, "boot-stages")) {
+			if (accept(dp, YAML_SCALAR_EVENT, value))
+				continue;
+
+			expect(dp, YAML_SEQUENCE_START_EVENT, NULL);
+
+			while (accept(dp, YAML_MAPPING_START_EVENT, NULL)) {
+				while (accept(dp, YAML_SCALAR_EVENT, key)) {
+					enum boot_stage boot_stage_type = BOOT_NONE;
+
+					expect(dp, YAML_SCALAR_EVENT, value);
+
+					if (!strcmp(key, "pyamlboot")) {
+						boot_stage_type = BOOT_PYAMLBOOT;
+					} else if (!strcmp(key, "dfu")) {
+						boot_stage_type = BOOT_DFU;
+					} else {
+						fprintf(stderr, "device parser: Unknown boot stage '%s'\n", key);
+					}
+
+					dev->boot_stages[dev->boot_num_stages] = boot_stage_type;
+					dev->boot_stage_options[dev->boot_num_stages] = strdup(value);
+					++dev->boot_num_stages;
+				}
+
+				expect(dp, YAML_MAPPING_END_EVENT, NULL);
+			}
+			expect(dp, YAML_SEQUENCE_END_EVENT, NULL);
+
+			continue;
+		}
+
 		expect(dp, YAML_SCALAR_EVENT, value);
 
 		if (!strcmp(key, "board")) {
 			dev->board = strdup(value);
 		} else if (!strcmp(key, "name")) {
 			dev->name = strdup(value);
-		} else if (!strcmp(key, "cdba")) {
-			dev->control_dev = strdup(value);
-
-			dev->open = cdb_assist_open;
-			dev->close = cdb_assist_close;
-			dev->power = cdb_assist_power;
-			dev->print_status = cdb_assist_print_status;
-			dev->usb = cdb_assist_usb;
-			dev->key = cdb_assist_key;
 		} else if (!strcmp(key, "conmux")) {
 			dev->control_dev = strdup(value);
 
 			dev->open = conmux_open;
 			dev->power = conmux_power;
 			dev->write = conmux_write;
-		} else if (!strcmp(key, "alpaca")) {
+		} else if (!strcmp(key, "ftdi_gpio")) {
 			dev->control_dev = strdup(value);
 
-			dev->open = alpaca_open;
-			dev->power = alpaca_power;
-			dev->usb = alpaca_usb;
-			dev->key = alpaca_key;
-		} else if (!strcmp(key, "qcomlt_debug_board")) {
+			dev->open = ftdi_gpio_open;
+			dev->power = ftdi_gpio_power;
+			dev->usb = ftdi_gpio_usb;
+			dev->key = ftdi_gpio_key;
+		} else if (!strcmp(key, "local_gpio")) {
 			dev->control_dev = strdup(value);
 
-			dev->open = qcomlt_dbg_open;
-			dev->power = qcomlt_dbg_power;
-			dev->usb = qcomlt_dbg_usb;
-			dev->key = qcomlt_dbg_key;
+			dev->open = local_gpio_open;
+			dev->power = local_gpio_power;
+			dev->usb = local_gpio_usb;
+			dev->key = local_gpio_key;
 		} else if (!strcmp(key, "console")) {
 			dev->console_dev = strdup(value);
 			dev->write = console_write;
 			dev->send_break = console_send_break;
 		} else if (!strcmp(key, "voltage")) {
 			dev->voltage = strtoul(value, NULL, 10);
-		} else if (!strcmp(key, "fastboot")) {
-			dev->serial = strdup(value);
-
-			if (!dev->boot)
-				dev->boot = device_fastboot_boot;
-		} else if (!strcmp(key, "fastboot_set_active")) {
-			dev->set_active = !strcmp(value, "true");
-		} else if (!strcmp(key, "broken_fastboot_boot")) {
-			if (!strcmp(value, "true"))
-				dev->boot = device_fastboot_flash_reboot;
 		} else if (!strcmp(key, "description")) {
 			dev->description = strdup(value);
-		} else if (!strcmp(key, "fastboot_key_timeout")) {
-			dev->fastboot_key_timeout = strtoul(value, NULL, 10);
+		} else if (!strcmp(key, "boot_key_timeout")) {
+			dev->boot_key_timeout = strtoul(value, NULL, 10);
 		} else if (!strcmp(key, "usb_always_on")) {
 			dev->usb_always_on = !strcmp(value, "true");
+		} else if (!strcmp(key, "ppps_path")) {
+			dev->ppps_path = strdup(value);
 		} else {
 			fprintf(stderr, "device parser: unknown key \"%s\"\n", key);
 			exit(1);
 		}
 	}
 
-	if (!dev->board || !dev->serial || !(dev->open || dev->console_dev)) {
+	if (!dev->board || !dev->boot_num_stages || !(dev->open || dev->console_dev)) {
 		fprintf(stderr, "device parser: insufficiently defined device\n");
 		exit(1);
 	}

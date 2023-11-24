@@ -34,12 +34,11 @@
 #include <err.h>
 #include <unistd.h>
 
-#include "cdba-server.h"
+#include "abcd-server.h"
 #include "device.h"
 
 static int console_data(int fd, void *data)
 {
-	struct msg hdr;
 	char buf[128];
 	ssize_t n;
 
@@ -47,10 +46,7 @@ static int console_data(int fd, void *data)
 	if (n < 0)
 		return n;
 
-	hdr.type = MSG_CONSOLE;
-	hdr.len = n;
-	write(STDOUT_FILENO, &hdr, sizeof(hdr));
-	write(STDOUT_FILENO, buf, n);
+	abcd_send_buf(MSG_CONSOLE, n, buf);
 
 	return 0;
 }

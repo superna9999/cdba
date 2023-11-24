@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Linaro Ltd.
+ * Copyright (c) 2023, Linaro Ltd.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,73 +29,49 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#define _GNU_SOURCE /* for asprintf */
+#include <sys/socket.h>
 #include <sys/types.h>
+#include <arpa/inet.h>
 #include <ctype.h>
-#include <dirent.h>
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <termios.h>
+#include <stdlib.h>
 #include <unistd.h>
+#include <stdbool.h>
 
-#include "cdba-server.h"
-#include "qcomlt_dbg.h"
+#include "device.h"
 
-struct qcomlt_dbg {
-	int fd;
-	struct termios orig_tios;
-};
+#define PPPS_BASE_PATH "/sys/bus/usb/devices"
+#define PPPS_BASE_PATH_LEN strlen(PPPS_BASE_PATH)
 
-void *qcomlt_dbg_open(struct device *dev)
+void ppps_power(struct device *dev, bool on)
 {
-	struct qcomlt_dbg *dbg;
+	static char *path = NULL;
+	int rc, fd;
 
-	dev->has_power_key = true;
-
-	dbg = calloc(1, sizeof(*dbg));
-
-	dbg->fd = tty_open(dev->control_dev, &dbg->orig_tios);
-	if (dbg->fd < 0)
-		err(1, "failed to open %s", dev->control_dev);
-
-	// fprintf(stderr, "qcomlt_dbg_open()\n");
-	write(dbg->fd, "brpu", 4);
-
-	return dbg;
-}
-
-int qcomlt_dbg_power(struct device *dev, bool on)
-{
-	struct qcomlt_dbg *dbg = dev->cdb;	
-
-	// fprintf(stderr, "qcomlt_dbg_power(%d)\n", on);
-	return write(dbg->fd, &("pP"[on]), 1);
-}
-
-void qcomlt_dbg_usb(struct device *dev, bool on)
-{
-	struct qcomlt_dbg *dbg = dev->cdb;	
-
-	// fprintf(stderr, "qcomlt_dbg_usb(%d)\n", on);
-	write(dbg->fd, &("uU"[on]), 1);
-}
-
-void qcomlt_dbg_key(struct device *dev, int key, bool asserted)
-{
-	struct qcomlt_dbg *dbg = dev->cdb;	
-
-	// fprintf(stderr, "qcomlt_dbg_key(%d, %d)\n", key, asserted);
-
-	switch (key) {
-	case DEVICE_KEY_FASTBOOT:
-		write(dbg->fd, &("rR"[asserted]), 1);
-		break;
-	case DEVICE_KEY_POWER:
-		write(dbg->fd, &("bB"[asserted]), 1);
-		break;
+	/* Only need to figure out the whole string once */
+	if (!path) {
+		/* ppps_path should be like "2-2:1.0/2-2-port2" */
+		asprintf(&path, "%s/%s/disable", PPPS_BASE_PATH, dev->ppps_path);
 	}
+
+	// fprintf(stderr, "ppps_power: %-3s %s\n", on ? "on" : "off", path);
+
+	fd = open(path, O_WRONLY);
+	if (fd < 0) {
+		fprintf(stderr, "failed to open %s: %s\n", path, strerror(errno));
+		if (errno != ENOENT)
+			fprintf(stderr, "Maybe missing permissions (see https://git.io/JIB2Z)\n");
+		return;
+	}
+
+	rc = write(fd, on ? "0" : "1", 1);
+	if (rc < 0)
+		fprintf(stderr, "failed to write to %s: %s\n", path, strerror(errno));
+
+	close(fd);
 }
